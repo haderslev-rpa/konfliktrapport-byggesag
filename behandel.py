@@ -489,32 +489,71 @@ async def _send_manuel_mail(
     sagsnummer: str,
     aarsag: str,
 ) -> None:
-    """Sender mail via q-outlook-api uden PDF-vedhæftning."""
+    """
+    Sender mail via q-outlook-api uden PDF-vedhæftning.
+
+    Output:
+        Funktionen returnerer None, når mailen er sendt.
+        Fejl fra Microsoft Graph sendes videre til workerens
+        almindelige fejlhåndtering.
+    """
     afsender = _paakraevet_tekst(
-            "MANUEL_MAIL_AFSENDER",
+        MANUEL_MAIL_AFSENDER,
+        "MANUEL_MAIL_AFSENDER",
     )
+
+    valideret_modtager = _paakraevet_tekst(
+        modtager,
+        "modtager",
+    )
+
+    valideret_sagsnummer = _paakraevet_tekst(
+        sagsnummer,
+        "sagsnummer",
+    )
+
+    valideret_aarsag = _paakraevet_tekst(
+        aarsag,
+        "aarsag",
+    )
+
     mail = {
         "subject": MANUEL_MAIL_EMNE,
         "body": (
-            f"{aarsag}<br><br>"
-            f"Acadre-sag: {sagsnummer}"
+            f"{valideret_aarsag}<br><br>"
+            f"Acadre-sag: {valideret_sagsnummer}"
         ),
         "content_type": "HTML",
-        "to": modtager,
+        "to": valideret_modtager,
         "attachments": [],
         "save_to_sent_items": True,
     }
+
     logger.info(
-        "Sender manuel mail om Acadre-sag %s til %s.",
-        sagsnummer,
-        modtager,
+        "Sender manuel mail om Acadre-sag %s "
+        "fra %s til %s.",
+        valideret_sagsnummer,
+        afsender,
+        valideret_modtager,
     )
-    await asyncio.to_thread(
+
+    mail_sendt = await asyncio.to_thread(
         send_mail,
         afsender,
         mail,
     )
 
+    if mail_sendt is not True:
+        raise RuntimeError(
+            "q-outlook-api bekræftede ikke, "
+            "at den manuelle mail blev sendt."
+        )
+
+    logger.info(
+        "Manuel mail om Acadre-sag %s er sendt til %s.",
+        valideret_sagsnummer,
+        valideret_modtager,
+    )
 
 def _er_acadre_sag_ikke_fundet(exc: RuntimeError) -> bool:
     """Genkender et eksplicit HTTP 404-svar fra Acadre."""

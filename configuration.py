@@ -102,7 +102,7 @@ WEBGIS_TEMA_LANDZONESAG = (
 
 WEBGIS_TIMEOUT_MS = 60_000
 
-WEBGIS_RAPPORT_TIMEOUT_MS = 180_000
+WEBGIS_RAPPORT_TIMEOUT_MS = 900_000
 
 
 # ------------------------------------------------------------
