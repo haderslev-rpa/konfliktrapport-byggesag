@@ -27,10 +27,6 @@ from configuration import (
     KONFLIKTRAPPORT_FILNAVN,
     KONFLIKTRAPPORT_STI,
     LANDZONESAG_TEKST,
-    MANUEL_MAIL_AFSENDER,
-    MANUEL_MAIL_BYGGESAG,
-    MANUEL_MAIL_EMNE,
-    MANUEL_MAIL_LANDZONESAG,
     MANUELLE_BUILDINGREGULATIONER,
     RUNTIME_MAPPE,
     WEBGIS_CREDENTIAL_NAME,
@@ -72,6 +68,12 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------
 
 STATUS_MANUEL = "Manuel"
+
+# Mailopsætning ligger bevidst i behandel.py.
+MANUEL_MAIL_AFSENDER = "dirxoas@haderslev.dk"
+MANUEL_MAIL_BYGGESAG = "Byg@haderslev.dk"
+MANUEL_MAIL_LANDZONESAG = "Plan@haderslev.dk"
+MANUEL_MAIL_EMNE = "Robot: Konfliktrapporten fejl"
 
 STATE_MANUEL_BUILDINGREGULATION_PREFIX = (
     "0.5 Buildingregulation skal ikke behandles"
@@ -123,19 +125,76 @@ async def behandel_page(
         webgis_data.get("buildingregulation"),
         "box.webgis.buildingregulation",
     )
-    teknisk_case_id = _positivt_heltal_som_tekst(
-        webgis_data.get("esdhid"),
-        "box.webgis.esdhid",
-    )
     sagsnummer = _paakraevet_tekst(
         webgis_data.get("esdhdisplayid"),
         "box.webgis.esdhdisplayid",
+    )
+    teknisk_case_id = _valgfrit_positivt_heltal_som_tekst(
+        webgis_data.get("esdhid")
     )
 
     await launch_acadre(
         page=page,
         session=session,
     )
+
+    if teknisk_case_id is None:
+        logger.info(
+            "box.webgis.esdhid mangler. Søger i Acadre efter "
+            "sagsnummer %s som fallback.",
+            sagsnummer,
+        )
+        search_result = await search_case_by_number(
+            page=page,
+            case_number=sagsnummer,
+            page_size=ACADRE_PAGE_SIZE,
+            page_index=0,
+            timeout_ms=ACADRE_TIMEOUT_MS,
+        )
+
+        try:
+            fallback_sag = _hent_entydigt_acadre_match(
+                search_result=search_result,
+                sagsnummer=sagsnummer,
+            )
+        except WorkItemError:
+            logger.warning(
+                "Acadre-sag %s kunne ikke findes entydigt, "
+                "mens box.webgis.esdhid var tom.",
+                sagsnummer,
+            )
+            return await _afslut_som_manuel_acadre_sag(
+                data=data,
+                item=item,
+                buildingregulation=buildingregulation,
+                sagsnummer=sagsnummer,
+                state=STATE_MANUEL_ACADRE_IKKE_FUNDET,
+                aarsag=(
+                    "Konfliktrapporten kunne ikke journaliseres i "
+                    "Acadre, fordi sagen ikke kunne findes entydigt."
+                ),
+            )
+
+        teknisk_case_id = _positivt_heltal_som_tekst(
+            fallback_sag.get("case_id"),
+            "Acadre-søgningens case_id",
+        )
+        update_item_data(
+            data,
+            item=item,
+            box_updates={
+                "acadre_case_id_fundet_via_sagsnummer": (
+                    teknisk_case_id
+                ),
+                "acadre_case_number_fallback": sagsnummer,
+            },
+        )
+        logger.info(
+            "Acadre-sag %s blev fundet via sagsnummer med "
+            "caseId %s.",
+            sagsnummer,
+            teknisk_case_id,
+        )
 
     try:
         case_details = await get_case_details_by_id(
@@ -432,8 +491,7 @@ async def _send_manuel_mail(
 ) -> None:
     """Sender mail via q-outlook-api uden PDF-vedhæftning."""
     afsender = _paakraevet_tekst(
-        MANUEL_MAIL_AFSENDER,
-        "KONFLIKTRAPPORT_MAIL_AFSENDER",
+            "MANUEL_MAIL_AFSENDER",
     )
     mail = {
         "subject": MANUEL_MAIL_EMNE,
@@ -867,6 +925,25 @@ def _hent_http_credentials(
         "username": username,
         "password": password,
     }
+
+
+def _valgfrit_positivt_heltal_som_tekst(
+    value: Any,
+) -> str | None:
+    """Returnerer et positivt heltal som tekst eller None ved blank værdi."""
+    if value is None:
+        return None
+
+    tekst = str(value).strip()
+    if not tekst:
+        return None
+
+    if isinstance(value, bool) or not tekst.isdigit() or int(tekst) <= 0:
+        raise WorkItemError(
+            "box.webgis.esdhid skal være tom eller et positivt heltal."
+        )
+
+    return tekst
 
 
 def _positivt_heltal_som_tekst(
