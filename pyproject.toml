@@ -1,14 +1,21 @@
 [project]
-name = "process-template"
+name = "konfliktrapport-byggesag"
 version = "0.2.0"
-description = "Add your description here"
+description = "Opretter konfliktrapporter for byggesager via WebGIS"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "automation-server-client",
     "q-haderslev-vbo",
+    "q-webgis",
+    "q-acadre",
+    "q-outlook-api",
+    "playwright>=1.62.0",
 ]
 
 [tool.uv.sources]
 automation-server-client = { git = "https://github.com/odense-rpa/automation-server-client.git", tag = "v0.3.0" }
 q-haderslev-vbo = { git = "https://github.com/haderslev-rpa/q-haderslev-vbo.git", branch = "main" }
+q-webgis = { git = "https://github.com/haderslev-rpa/q-webgis.git", branch = "main" }
+q-acadre = { git = "https://github.com/haderslev-rpa/q-acadre.git", branch = "main" }
+q-outlook-api = { git = "https://github.com/haderslev-rpa/q-outlook-api.git", branch = "main" }
