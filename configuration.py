@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 
@@ -156,16 +155,9 @@ ACADRE_STATUS = "J"
 
 
 # ------------------------------------------------------------
-# Manuel behandling og mail
+# Acadre-status
 # ------------------------------------------------------------
 ACADRE_AFSLUTTET_STATUS = "A"
-MANUEL_MAIL_BYGGESAG = "Byg@haderslev.dk"
-MANUEL_MAIL_LANDZONESAG = "Plan@haderslev.dk"
-MANUEL_MAIL_AFSENDER = os.getenv(
-    "KONFLIKTRAPPORT_MAIL_AFSENDER",
-    "",
-).strip()
-MANUEL_MAIL_EMNE = "Robot: Konfliktrapporten fejl"
 
 # ------------------------------------------------------------
 # Buildingregulation
