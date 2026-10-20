@@ -158,7 +158,7 @@ ACADRE_STATUS = "J"
 # ------------------------------------------------------------
 # Manuel behandling og mail
 # ------------------------------------------------------------
-ACADRE_AFSLUTTET_STATUS = "Afsluttet"
+ACADRE_AFSLUTTET_STATUS = "A"
 MANUEL_MAIL_BYGGESAG = "Byg@haderslev.dk"
 MANUEL_MAIL_LANDZONESAG = "Plan@haderslev.dk"
 MANUEL_MAIL_AFSENDER = os.getenv(
