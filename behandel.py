@@ -88,6 +88,9 @@ STATE_MANUEL_ACADRE_AFSLUTTET = (
 STATE_MANUEL_ACADRE_IKKE_FUNDET = (
     "0.7 Acadre-sagen blev ikke fundet"
 )
+STATE_MANUEL_WEBGIS_RAPPORT_FEJLET = (
+    "0.8 WebGIS kunne ikke generere konfliktrapport"
+)
 
 
 # ------------------------------------------------------------
@@ -290,12 +293,39 @@ async def behandel_page(
         )
         tema = _vaelg_webgis_tema(buildingregulation)
 
-        rapport_sti = await _hent_konfliktrapport_fra_webgis(
-            wkt=shape_wkt,
-            tema=tema,
-            rapport_sti=rapport_sti,
-            debug=bool(getattr(session, "debug", False)),
-        )
+        try:
+            rapport_sti = await _hent_konfliktrapport_fra_webgis(
+                wkt=shape_wkt,
+                tema=tema,
+                rapport_sti=rapport_sti,
+                debug=bool(getattr(session, "debug", False)),
+            )
+        except RuntimeError as error:
+            if not _er_webgis_rapport_timeout(error):
+                raise
+
+            aarsag = (
+                "WebGIS kunne ikke generere konfliktrapporten "
+                "efter to komplette forsøg i hver sin "
+                "browser-session. Sagen skal behandles manuelt."
+            )
+
+            logger.error(
+                "%s Sagsnummer=%s. Sidste WebGIS-fejl: %s",
+                aarsag,
+                sagsnummer,
+                error,
+            )
+
+            return await _afslut_som_manuel_acadre_sag(
+                data=data,
+                item=item,
+                buildingregulation=buildingregulation,
+                sagsnummer=sagsnummer,
+                state=STATE_MANUEL_WEBGIS_RAPPORT_FEJLET,
+                aarsag=aarsag,
+            )
+
         _valider_pdf(rapport_sti)
 
         logger.info(
@@ -575,26 +605,102 @@ async def _hent_konfliktrapport_fra_webgis(
     debug: bool,
 ) -> Path:
     """
-    Opretter en isoleret WebGIS-session og returnerer PDF-stien.
+    Opretter WebGIS-rapporten med højst to komplette forsøg.
+
+    Hvert forsøg bruger en ny BrowserSession og en ny Page. Hvis
+    WebGIS bliver stående på rapportens "Arbejder..."-overlay uden
+    at levere PDF, lukkes hele sessionen før næste forsøg.
 
     Output:
-        Den absolutte sti til den validerbare konfliktrapport.
+        Path til den gemte og validerbare PDF-fil.
     """
-    credentials = _hent_http_credentials(
+    samlet_antal_forsoeg = 2
+    sidste_fejl: RuntimeError | None = None
+
+    for forsoeg in range(1, samlet_antal_forsoeg + 1):
+        _ryd_gammel_konfliktrapport(rapport_sti)
+
+        logger.info(
+            "Starter komplet WebGIS-forsøg %s af %s i ny "
+            "browser-session.",
+            forsoeg,
+            samlet_antal_forsoeg,
+        )
+
+        try:
+            gemt_sti = await _hent_konfliktrapport_fra_webgis_enkelt_forsoeg(
+                wkt=wkt,
+                tema=tema,
+                rapport_sti=rapport_sti,
+                debug=debug,
+            )
+
+            logger.info(
+                "WebGIS-forsøg %s af %s lykkedes.",
+                forsoeg,
+                samlet_antal_forsoeg,
+            )
+
+            return gemt_sti
+
+        except RuntimeError as error:
+            if not _er_webgis_rapport_timeout(error):
+                raise
+
+            sidste_fejl = error
+
+            logger.warning(
+                "WebGIS-forsøg %s af %s leverede ikke en PDF. "
+                "Sessionen er lukket og må ikke genbruges. Fejl: %s",
+                forsoeg,
+                samlet_antal_forsoeg,
+                error,
+            )
+
+            if forsoeg < samlet_antal_forsoeg:
+                logger.info(
+                    "Starter et sidste komplet WebGIS-forsøg med "
+                    "ny browser-session, nyt login, ny WKT og ny "
+                    "konfliktsøgning."
+                )
+
+    raise RuntimeError(
+        "WebGIS leverede ikke en PDF efter to komplette forsøg "
+        "i hver sin browser-session. Sidste fejl: "
+        f"{sidste_fejl}"
+    ) from sidste_fejl
+
+
+async def _hent_konfliktrapport_fra_webgis_enkelt_forsoeg(
+    *,
+    wkt: str,
+    tema: str,
+    rapport_sti: Path,
+    debug: bool,
+) -> Path:
+    """
+    Udfører ét komplet WebGIS-forsøg i en isoleret BrowserSession.
+
+    BrowserSession og Page lukkes altid, også når rapportgenereringen
+    fejler eller rammer timeout.
+
+    Output:
+        Path til den gemte PDF-fil.
+    """
+    http_credentials = _hent_http_credentials(
         WEBGIS_CREDENTIAL_NAME
     )
 
     webgis_session = BrowserSession(
         headless=HEADLESS,
         debug=debug,
-        http_credentials=credentials,
+        video=False,
+        http_credentials=http_credentials,
     )
-
     webgis_page: Page | None = None
 
     try:
         await webgis_session.start()
-
         webgis_page = await webgis_session.new_page()
 
         response = await webgis_page.goto(
@@ -629,22 +735,16 @@ async def _hent_konfliktrapport_fra_webgis(
             filnavn=KONFLIKTRAPPORT_FILNAVN,
             vaelg_jordstykker_byggesag=True,
             timeout_ms=WEBGIS_TIMEOUT_MS,
-            rapport_timeout_ms=(
-                WEBGIS_RAPPORT_TIMEOUT_MS
-            ),
+            rapport_timeout_ms=WEBGIS_RAPPORT_TIMEOUT_MS,
         )
 
-        gemt_sti = Path(
-            gemt_sti
-        ).resolve()
+        gemt_sti = Path(gemt_sti).resolve()
 
         if gemt_sti != rapport_sti:
             if rapport_sti.exists():
                 rapport_sti.unlink()
 
-            gemt_sti.replace(
-                rapport_sti
-            )
+            gemt_sti.replace(rapport_sti)
 
         return rapport_sti
 
@@ -653,11 +753,26 @@ async def _hent_konfliktrapport_fra_webgis(
             webgis_page is not None
             and not webgis_page.is_closed()
         ):
-            await webgis_session.close_page(
-                webgis_page
-            )
+            await webgis_session.close_page(webgis_page)
 
         await webgis_session.close()
+
+
+def _er_webgis_rapport_timeout(
+    error: BaseException,
+) -> bool:
+    """
+    Genkender den målrettede fejl, hvor WebGIS ikke leverer en PDF.
+
+    Andre browser-, login- og programmeringsfejl genkøres ikke og
+    sendes ikke automatisk til manuel behandling.
+    """
+    fejltekst = _normaliser_tekst(str(error))
+
+    return (
+        "webgis leverede ikke en pdf" in fejltekst
+        or "webgis startede ikke pdf-downloadet" in fejltekst
+    )
 
 
 # ------------------------------------------------------------
@@ -1037,3 +1152,4 @@ def _normaliser_tekst(
 
 
 __all__ = ["behandel_page"]
+
