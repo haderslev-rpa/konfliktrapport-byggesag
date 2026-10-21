@@ -35,7 +35,6 @@ WEBGIS_HOSTNAME = (
 )
 
 WEBGIS_CREDENTIAL_NAME = "DIRXOAS"
-
 WEBGIS_PROFILE = "maxi"
 
 
@@ -44,11 +43,8 @@ WEBGIS_PROFILE = "maxi"
 # ------------------------------------------------------------
 
 JSESSIONID_COOKIE_NAME = "JSESSIONID"
-
 SESSION_ID_HEADER_NAME = "session-id"
-
 NAVIGATION_TIMEOUT_MS = 60_000
-
 SESSION_TIMEOUT_SECONDS = 60
 
 
@@ -61,17 +57,11 @@ DATASOURCE = (
 )
 
 COMMAND = "read-spatial"
-
 SPATIAL_EXPRESSION = "this"
-
 JSON_TYPES = "true"
-
 OUTPUT_FORMAT = "json"
-
 ERROR_CONTENT_TYPE = "json"
-
 PROFILE = "maxi"
-
 MAX_ROWS = 20_000
 
 
@@ -80,13 +70,9 @@ MAX_ROWS = 20_000
 # ------------------------------------------------------------
 
 # Verificerede koordinater fra WebGIS-requestet.
-
 MIN_X_WC = 471348.098304
-
 MIN_Y_WC = 6096657.6526848
-
 MAX_X_WC = 569651.901696
-
 MAX_Y_WC = 6149342.3473152
 
 
@@ -102,7 +88,8 @@ WEBGIS_TEMA_LANDZONESAG = (
 
 WEBGIS_TIMEOUT_MS = 60_000
 
-WEBGIS_RAPPORT_TIMEOUT_MS = 1200_000
+# Samlet ventetid for én WebGIS-rapportbestilling: 90 minutter.
+WEBGIS_RAPPORT_TIMEOUT_MS = 90 * 60 * 1_000
 
 
 # ------------------------------------------------------------
@@ -128,9 +115,7 @@ KONFLIKTRAPPORT_STI = (
 # ------------------------------------------------------------
 
 ACADRE_CREDENTIAL_NAME = "DIRXSDA"
-
 ACADRE_TIMEOUT_MS = 120_000
-
 ACADRE_PAGE_SIZE = 50
 
 
@@ -149,15 +134,15 @@ ACADRE_KATEGORI = (
 )
 
 ACADRE_PUBLIC_ACCESS = "1"
-
 ACADRE_STATUS = "J"
-
 
 
 # ------------------------------------------------------------
 # Acadre-status
 # ------------------------------------------------------------
+
 ACADRE_AFSLUTTET_STATUS = "A"
+
 
 # ------------------------------------------------------------
 # Buildingregulation
