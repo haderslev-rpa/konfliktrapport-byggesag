@@ -563,7 +563,7 @@ dependencies = [
 [[package]]
 name = "q-webgis"
 version = "0.1.0"
-source = { git = "https://github.com/haderslev-rpa/q-webgis.git?branch=main#7dbd4beb7af41a76288907290b4f171672757b06" }
+source = { git = "https://github.com/haderslev-rpa/q-webgis.git?branch=main#1336329604a123e1ca953c079d70db8c53e93f00" }
 dependencies = [
     { name = "automation-server-client" },
     { name = "pillow" },
