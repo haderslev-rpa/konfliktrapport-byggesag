@@ -89,7 +89,7 @@ WEBGIS_TEMA_LANDZONESAG = (
 WEBGIS_TIMEOUT_MS = 60_000
 
 # Samlet ventetid for én WebGIS-rapportbestilling: 90 minutter.
-WEBGIS_RAPPORT_TIMEOUT_MS = 90 * 60 * 1_000
+WEBGIS_RAPPORT_TIMEOUT_MS = 120 * 60 * 1_000
 
 
 # ------------------------------------------------------------
