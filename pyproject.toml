@@ -10,7 +10,7 @@ dependencies = [
     "q-webgis",
     "q-acadre",
     "q-outlook-api",
-    "playwright>=1.59.0",
+    "playwright>=1.60.0",
 ]
 
 [tool.uv.sources]
