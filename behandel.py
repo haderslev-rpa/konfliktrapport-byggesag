@@ -603,8 +603,10 @@ async def _hent_konfliktrapport_fra_webgis(
     Henter WebGIS-rapporten gennem browserprocessen fra main.py.
 
     Chromium startes ikke igen for hvert item. Hvert forsøg får kun
-    en ny Page i den eksisterende BrowserSession. Det undgår nye
-    BrowserType.launch-kald under itembehandlingen.
+    en ny Page i den eksisterende BrowserSession.
+
+    BrowserContext oprettes automatisk af BrowserSession.new_page(),
+    første gang funktionen kaldes.
 
     Output:
         Path til den gemte og validerbare PDF-fil.
@@ -614,10 +616,9 @@ async def _hent_konfliktrapport_fra_webgis(
             "webgis_session skal angives."
         )
 
-    if (
-        webgis_session.browser is None
-        or webgis_session.context is None
-    ):
+    # start() opretter browseren.
+    # Contexten bliver først oprettet af new_page().
+    if webgis_session.browser is None:
         raise RuntimeError(
             "WebGIS BrowserSession er ikke startet. "
             "Sessionen skal startes én gang i main.py."
@@ -644,6 +645,8 @@ async def _hent_konfliktrapport_fra_webgis(
         )
 
         try:
+            # Første kald opretter automatisk BrowserContext.
+            # Senere kald genbruger samme context.
             webgis_page = (
                 await webgis_session.new_page()
             )
@@ -654,7 +657,10 @@ async def _hent_konfliktrapport_fra_webgis(
                 timeout=WEBGIS_TIMEOUT_MS,
             )
 
-            if response is None or not response.ok:
+            if (
+                response is None
+                or not response.ok
+            ):
                 status = (
                     response.status
                     if response is not None
@@ -743,7 +749,6 @@ async def _hent_konfliktrapport_fra_webgis(
         "forsøg i den eksisterende browserproces. "
         f"Sidste fejl: {sidste_fejl}"
     ) from sidste_fejl
-
 
 
 def _er_webgis_rapport_timeout(
