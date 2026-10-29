@@ -7,11 +7,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from automation_server_client import (
-    AutomationServer,
-    Credential,
-    WorkItemError,
-)
+from automation_server_client import WorkItemError
 from playwright.async_api import Page
 
 from configuration import (
@@ -23,13 +19,11 @@ from configuration import (
     ACADRE_PUBLIC_ACCESS,
     ACADRE_STATUS,
     ACADRE_TIMEOUT_MS,
-    HEADLESS,
     KONFLIKTRAPPORT_FILNAVN,
     KONFLIKTRAPPORT_STI,
     LANDZONESAG_TEKST,
     MANUELLE_BUILDINGREGULATIONER,
     RUNTIME_MAPPE,
-    WEBGIS_CREDENTIAL_NAME,
     WEBGIS_RAPPORT_TIMEOUT_MS,
     WEBGIS_TEMA_BYGGESAG,
     WEBGIS_TEMA_LANDZONESAG,
@@ -101,6 +95,7 @@ async def behandel_page(
     item: Any,
     session: BrowserSession,
     page: Page,
+    webgis_session: BrowserSession,
 ) -> dict[str, Any] | None:
     """
     Behandler ét byggesags-item.
@@ -295,10 +290,10 @@ async def behandel_page(
 
         try:
             rapport_sti = await _hent_konfliktrapport_fra_webgis(
+                webgis_session=webgis_session,
                 wkt=shape_wkt,
                 tema=tema,
                 rapport_sti=rapport_sti,
-                debug=bool(getattr(session, "debug", False)),
             )
         except RuntimeError as error:
             if not _er_webgis_rapport_timeout(error):
@@ -306,8 +301,8 @@ async def behandel_page(
 
             aarsag = (
                 "WebGIS kunne ikke generere konfliktrapporten "
-                "efter to komplette forsøg i hver sin "
-                "browser-session. Sagen skal behandles manuelt."
+                "efter to komplette forsøg i den eksisterende "
+                "browserproces. Sagen skal behandles manuelt."
             )
 
             logger.error(
@@ -599,41 +594,108 @@ def _er_acadre_sag_ikke_fundet(exc: RuntimeError) -> bool:
 
 async def _hent_konfliktrapport_fra_webgis(
     *,
+    webgis_session: BrowserSession,
     wkt: str,
     tema: str,
     rapport_sti: Path,
-    debug: bool,
 ) -> Path:
     """
-    Opretter WebGIS-rapporten med højst to komplette forsøg.
+    Henter WebGIS-rapporten gennem browserprocessen fra main.py.
 
-    Hvert forsøg bruger en ny BrowserSession og en ny Page. Hvis
-    WebGIS bliver stående på rapportens "Arbejder..."-overlay uden
-    at levere PDF, lukkes hele sessionen før næste forsøg.
+    Chromium startes ikke igen for hvert item. Hvert forsøg får kun
+    en ny Page i den eksisterende BrowserSession. Det undgår nye
+    BrowserType.launch-kald under itembehandlingen.
 
     Output:
         Path til den gemte og validerbare PDF-fil.
     """
+    if webgis_session is None:
+        raise ValueError(
+            "webgis_session skal angives."
+        )
+
+    if (
+        webgis_session.browser is None
+        or webgis_session.context is None
+    ):
+        raise RuntimeError(
+            "WebGIS BrowserSession er ikke startet. "
+            "Sessionen skal startes én gang i main.py."
+        )
+
     samlet_antal_forsoeg = 2
     sidste_fejl: RuntimeError | None = None
 
-    for forsoeg in range(1, samlet_antal_forsoeg + 1):
-        _ryd_gammel_konfliktrapport(rapport_sti)
+    for forsoeg in range(
+        1,
+        samlet_antal_forsoeg + 1,
+    ):
+        _ryd_gammel_konfliktrapport(
+            rapport_sti
+        )
+
+        webgis_page: Page | None = None
 
         logger.info(
-            "Starter komplet WebGIS-forsøg %s af %s i ny "
-            "browser-session.",
+            "Starter WebGIS-forsøg %s af %s i den "
+            "eksisterende browserproces.",
             forsoeg,
             samlet_antal_forsoeg,
         )
 
         try:
-            gemt_sti = await _hent_konfliktrapport_fra_webgis_enkelt_forsoeg(
+            webgis_page = (
+                await webgis_session.new_page()
+            )
+
+            response = await webgis_page.goto(
+                WEBGIS_URL,
+                wait_until="domcontentloaded",
+                timeout=WEBGIS_TIMEOUT_MS,
+            )
+
+            if response is None or not response.ok:
+                status = (
+                    response.status
+                    if response is not None
+                    else "intet svar"
+                )
+
+                raise RuntimeError(
+                    "WebGIS kunne ikke åbnes. "
+                    f"HTTP-status: {status}."
+                )
+
+            rapport_sti.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+
+            gemt_sti = await opret_webgis_rapport(
+                page=webgis_page,
+                session=webgis_session,
                 wkt=wkt,
                 tema=tema,
-                rapport_sti=rapport_sti,
-                debug=debug,
+                rapportmappe=rapport_sti.parent,
+                filnavn=KONFLIKTRAPPORT_FILNAVN,
+                vaelg_jordstykker_byggesag=True,
+                timeout_ms=WEBGIS_TIMEOUT_MS,
+                rapport_timeout_ms=(
+                    WEBGIS_RAPPORT_TIMEOUT_MS
+                ),
             )
+
+            gemt_sti = Path(
+                gemt_sti
+            ).resolve()
+
+            if gemt_sti != rapport_sti:
+                if rapport_sti.exists():
+                    rapport_sti.unlink()
+
+                gemt_sti.replace(
+                    rapport_sti
+                )
 
             logger.info(
                 "WebGIS-forsøg %s af %s lykkedes.",
@@ -641,17 +703,20 @@ async def _hent_konfliktrapport_fra_webgis(
                 samlet_antal_forsoeg,
             )
 
-            return gemt_sti
+            return rapport_sti
 
         except RuntimeError as error:
-            if not _er_webgis_rapport_timeout(error):
+            if not _er_webgis_rapport_timeout(
+                error
+            ):
                 raise
 
             sidste_fejl = error
 
             logger.warning(
-                "WebGIS-forsøg %s af %s leverede ikke en PDF. "
-                "Sessionen er lukket og må ikke genbruges. Fejl: %s",
+                "WebGIS-forsøg %s af %s leverede "
+                "ikke en PDF. Den aktuelle side lukkes. "
+                "Fejl: %s",
                 forsoeg,
                 samlet_antal_forsoeg,
                 error,
@@ -659,103 +724,26 @@ async def _hent_konfliktrapport_fra_webgis(
 
             if forsoeg < samlet_antal_forsoeg:
                 logger.info(
-                    "Starter et sidste komplet WebGIS-forsøg med "
-                    "ny browser-session, nyt login, ny WKT og ny "
-                    "konfliktsøgning."
+                    "Starter et sidste WebGIS-forsøg med "
+                    "en ny side i den eksisterende "
+                    "browserproces."
+                )
+
+        finally:
+            if (
+                webgis_page is not None
+                and not webgis_page.is_closed()
+            ):
+                await webgis_session.close_page(
+                    webgis_page
                 )
 
     raise RuntimeError(
-        "WebGIS leverede ikke en PDF efter to komplette forsøg "
-        "i hver sin browser-session. Sidste fejl: "
-        f"{sidste_fejl}"
+        "WebGIS leverede ikke en PDF efter to "
+        "forsøg i den eksisterende browserproces. "
+        f"Sidste fejl: {sidste_fejl}"
     ) from sidste_fejl
 
-
-async def _hent_konfliktrapport_fra_webgis_enkelt_forsoeg(
-    *,
-    wkt: str,
-    tema: str,
-    rapport_sti: Path,
-    debug: bool,
-) -> Path:
-    """
-    Udfører ét komplet WebGIS-forsøg i en isoleret BrowserSession.
-
-    BrowserSession og Page lukkes altid, også når rapportgenereringen
-    fejler eller rammer timeout.
-
-    Output:
-        Path til den gemte PDF-fil.
-    """
-    http_credentials = _hent_http_credentials(
-        WEBGIS_CREDENTIAL_NAME
-    )
-
-    webgis_session = BrowserSession(
-        headless=HEADLESS,
-        debug=debug,
-        video=False,
-        http_credentials=http_credentials,
-    )
-    webgis_page: Page | None = None
-
-    try:
-        await webgis_session.start()
-        webgis_page = await webgis_session.new_page()
-
-        response = await webgis_page.goto(
-            WEBGIS_URL,
-            wait_until="domcontentloaded",
-            timeout=WEBGIS_TIMEOUT_MS,
-        )
-
-        if response is None or not response.ok:
-            status = (
-                response.status
-                if response is not None
-                else "intet svar"
-            )
-
-            raise RuntimeError(
-                "WebGIS kunne ikke åbnes. "
-                f"HTTP-status: {status}."
-            )
-
-        rapport_sti.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        gemt_sti = await opret_webgis_rapport(
-            page=webgis_page,
-            session=webgis_session,
-            wkt=wkt,
-            tema=tema,
-            rapportmappe=rapport_sti.parent,
-            filnavn=KONFLIKTRAPPORT_FILNAVN,
-            vaelg_jordstykker_byggesag=True,
-            timeout_ms=WEBGIS_TIMEOUT_MS,
-            rapport_timeout_ms=WEBGIS_RAPPORT_TIMEOUT_MS,
-        )
-
-        gemt_sti = Path(gemt_sti).resolve()
-
-        if gemt_sti != rapport_sti:
-            if rapport_sti.exists():
-                rapport_sti.unlink()
-
-            gemt_sti.replace(rapport_sti)
-
-        return rapport_sti
-
-    finally:
-        if (
-            webgis_page is not None
-            and not webgis_page.is_closed()
-        ):
-            await webgis_session.close_page(webgis_page)
-
-        await webgis_session.close()
 
 
 def _er_webgis_rapport_timeout(
@@ -1045,42 +1033,6 @@ def _set_afsluttende_checkpoint(
 # CREDENTIALS OG VALIDERING
 # ------------------------------------------------------------
 
-def _hent_http_credentials(
-    credential_name: str,
-) -> dict[str, str]:
-    """Henter HTTP Basic credentials fra Automation Server."""
-    AutomationServer.from_environment()
-
-    credential = Credential.get_credential(
-        credential_name
-    )
-
-    if credential is None:
-        raise RuntimeError(
-            f"Credentialen {credential_name!r} "
-            "blev ikke fundet."
-        )
-
-    username = str(
-        credential.username or ""
-    ).strip()
-
-    password = str(
-        credential.password or ""
-    )
-
-    if not username or not password:
-        raise RuntimeError(
-            f"Credentialen {credential_name!r} mangler "
-            "username eller password."
-        )
-
-    return {
-        "username": username,
-        "password": password,
-    }
-
-
 def _valgfrit_positivt_heltal_som_tekst(
     value: Any,
 ) -> str | None:
@@ -1152,4 +1104,3 @@ def _normaliser_tekst(
 
 
 __all__ = ["behandel_page"]
-
