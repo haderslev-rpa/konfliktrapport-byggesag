@@ -180,8 +180,8 @@ async def process_workqueue(
     Behandler Automation Server-items ét ad gangen.
 
     Acadre- og WebGIS-browserprocesserne startes én gang før
-    item-loopet. behandel.py modtager de allerede startede sessioner
-    og må derfor ikke starte eller lukke Chromium pr. item.
+    item-loopet. Begge sessioner bruger den almindelige
+    Chromium-executable i stedet for Chrome Headless Shell.
     """
     logger.info(
         "Process workqueue mode started (debug=%s)",
@@ -196,6 +196,7 @@ async def process_workqueue(
         http_credentials=(
             _hent_acadre_http_credentials()
         ),
+        use_regular_chromium=True,
     )
 
     webgis_session = BrowserSession(
@@ -205,21 +206,22 @@ async def process_workqueue(
         http_credentials=(
             _hent_webgis_http_credentials()
         ),
+        use_regular_chromium=True,
     )
 
     acadre_page = None
 
     try:
         logger.info(
-            "Starter Acadre-browserprocessen én gang."
+            "Starter Acadre-browserprocessen én gang "
+            "med almindelig Chromium."
         )
-
         await acadre_session.start()
 
         logger.info(
-            "Starter WebGIS-browserprocessen én gang."
+            "Starter WebGIS-browserprocessen én gang "
+            "med almindelig Chromium."
         )
-
         await webgis_session.start()
 
         acadre_page = await acadre_session.new_page()
@@ -288,7 +290,6 @@ async def process_workqueue(
                         item.reference,
                         exc,
                     )
-
                     item.fail(
                         str(exc)
                     )
@@ -305,14 +306,12 @@ async def process_workqueue(
                         webgis_session=webgis_session,
                         fejltype=type(exc).__name__,
                     )
-
                     raise
 
     finally:
         logger.info(
             "Lukker WebGIS-browserprocessen."
         )
-
         try:
             await webgis_session.close()
         except Exception:
@@ -324,7 +323,6 @@ async def process_workqueue(
         logger.info(
             "Lukker Acadre-browserprocessen."
         )
-
         try:
             await acadre_session.close()
         except Exception:
